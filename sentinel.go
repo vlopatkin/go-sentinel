@@ -198,8 +198,6 @@ func (s *Sentinel) listen(ctx context.Context) {
 		case <-pingDone:
 			psc.Close()
 
-			<-recvDone
-
 		case <-ctx.Done():
 			psc.Unsubscribe()
 
@@ -221,19 +219,18 @@ func (s *Sentinel) listenPing(psc redis.PubSubConn, stop <-chan bool) (done chan
 	go func(stop <-chan bool, done chan error) {
 		t := time.NewTicker(s.heartbeatInterval)
 
+		defer t.Stop()
+		defer close(done)
+
 		for {
 			select {
 			case <-t.C:
 				psc.Conn.Send("PING")
 				if err := psc.Conn.Flush(); err != nil {
 					done <- err
-					close(done)
-					t.Stop()
 					return
 				}
 			case <-stop:
-				close(done)
-				t.Stop()
 				return
 			}
 		}
@@ -247,18 +244,18 @@ func (s *Sentinel) listenReceive(conn redis.PubSubConn) (done chan error) {
 	done = make(chan error, 1)
 
 	go func(done chan error) {
+		defer close(done)
+
 		for {
 			switch v := conn.Receive().(type) {
 			case redis.Subscription:
 				if v.Count == 0 {
-					close(done)
 					return
 				}
 			case redis.Message:
 				s.handleNotification(v)
 			case error:
 				done <- v
-				close(done)
 				return
 			}
 		}
@@ -282,9 +279,7 @@ func (s *Sentinel) handleNotification(msg redis.Message) {
 			return
 		}
 
-		addr := net.JoinHostPort(parts[3], parts[4])
-
-		grp.syncMaster(addr)
+		grp.syncMaster(net.JoinHostPort(parts[3], parts[4]))
 
 	case "+slave", "+sdown", "-sdown":
 		// <instance-type> <name> <ip> <port> @ <master-name> <master-ip> <master-port>

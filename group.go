@@ -12,7 +12,7 @@ type group struct {
 	slaves []string
 }
 
-func (g *group) getMaster() string {
+func (g *group) masterAddr() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
@@ -26,32 +26,26 @@ func (g *group) syncMaster(addr string) {
 	g.master = addr
 }
 
-func (g *group) getSlaves() []string {
+func (g *group) slavesAddrs() []string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	slaves := make([]string, len(g.slaves))
-
-	copy(slaves, g.slaves)
-
-	return slaves
+	return g.slaves
 }
 
 func (g *group) syncSlaves(addrs []string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	g.slaves = make([]string, len(addrs))
-
-	copy(g.slaves, addrs)
+	g.slaves = addrs
 }
 
 func (g *group) syncSlaveUp(addr string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	for _, slave := range g.slaves {
-		if slave == addr {
+	for _, saddr := range g.slaves {
+		if saddr == addr {
 			return
 		}
 	}
@@ -64,8 +58,8 @@ func (g *group) syncSlaveDown(addr string) {
 	defer g.mu.Unlock()
 
 	idx := -1
-	for i, slave := range g.slaves {
-		if slave == addr {
+	for i, saddr := range g.slaves {
+		if saddr == addr {
 			idx = i
 			break
 		}
