@@ -311,13 +311,13 @@ func (s *Sentinel) getMasterAddr(conn redis.Conn, name string) (string, error) {
 	v, err := redis.Strings(conn.Do("SENTINEL", "get-master-addr-by-name", name))
 	if err != nil {
 		if err == redis.ErrNil {
-			return "", masterNotFoundErr
+			return "", errMasterNotFound
 		}
 		return "", err
 	}
 
 	if len(v) != 2 {
-		return "", invalidGetMasterAddrReplyErr
+		return "", errInvalidGetMasterAddrReply
 	}
 
 	return net.JoinHostPort(v[0], v[1]), nil
@@ -377,7 +377,7 @@ func (s *Sentinel) getRole(addr string) (string, error) {
 	}
 
 	if len(v) < 2 {
-		return "", invalidRoleReplyErr
+		return "", errInvalidRoleReply
 	}
 
 	return redis.String(v[0], nil)
