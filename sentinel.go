@@ -35,7 +35,7 @@ type Config struct {
 
 	// DiscoverInterval represents interval for redis instances discover
 	DiscoverInterval time.Duration
-	// DiscoverRushInterval represents interval for redis instances discover in case of error occured
+	// DiscoverRushInterval represents interval for redis instances discover in case of error occurred
 	DiscoverRushInterval time.Duration
 
 	// HeartbeatInterval represents pub/sub conn healthcheck interval
