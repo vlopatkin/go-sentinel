@@ -1,0 +1,4 @@
+package: github.com/arwx/go-sentinel
+import:
+  - package: github.com/garyburd/redigo
+    version: v1.1.0
