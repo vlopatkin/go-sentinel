@@ -140,24 +140,24 @@ func (s *Sentinel) discover() error {
 }
 
 func (s *Sentinel) discoverGroup(conn redis.Conn, grp *group) error {
-	masterAddr, err := s.getMasterAddr(conn, grp.name)
+	master, err := s.getMasterAddr(conn, grp.name)
 	if err != nil {
 		return err
 	}
 
-	err = s.testRole(masterAddr, masterRole)
+	err = s.testRole(master, masterRole)
 	if err != nil {
 		return err
 	}
 
-	grp.syncMaster(masterAddr)
+	grp.syncMaster(master)
 
-	slavesAddrs, err := s.getSlavesAddrs(conn, grp.name)
+	slaves, err := s.getSlavesAddrs(conn, grp.name)
 	if err != nil {
 		return err
 	}
 
-	grp.syncSlaves(slavesAddrs)
+	grp.syncSlaves(slaves)
 
 	return nil
 }
@@ -184,36 +184,34 @@ func (s *Sentinel) listen(ctx context.Context) {
 			continue
 		}
 
-		psc := redis.PubSubConn{conn}
+		psconn := redis.PubSubConn{conn}
 
-		err = psc.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
+		err = psconn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
 		if err != nil {
-			psc.Close()
+			psconn.Close()
 			continue
 		}
 
-		pingStop := make(chan bool, 1)
+		recvDone := s.listenReceive(psconn)
 
-		recvDone := s.listenReceive(psc)
-		pingDone := s.listenPing(psc, pingStop)
+		stopPing := make(chan bool, 1)
+		pingDone := s.listenPing(psconn, stopPing)
 
 		select {
 		case <-recvDone:
-			close(pingStop)
-
-			psc.Close()
+			close(stopPing)
+			psconn.Close()
 
 		case <-pingDone:
-			psc.Close()
+			psconn.Close()
 
 		case <-ctx.Done():
-			psc.Unsubscribe()
-
-			close(pingStop)
+			psconn.Unsubscribe()
+			close(stopPing)
 
 			<-recvDone
 
-			psc.Close()
+			psconn.Close()
 			return
 		}
 
@@ -221,20 +219,20 @@ func (s *Sentinel) listen(ctx context.Context) {
 	}
 }
 
-func (s *Sentinel) listenPing(psc redis.PubSubConn, stop <-chan bool) (done chan error) {
+func (s *Sentinel) listenPing(psconn redis.PubSubConn, stop <-chan bool) (done chan error) {
 	done = make(chan error, 1)
 
 	go func(stop <-chan bool, done chan error) {
 		t := time.NewTicker(s.heartbeatInterval)
 
-		defer t.Stop()
 		defer close(done)
+		defer t.Stop()
 
 		for {
 			select {
 			case <-t.C:
-				psc.Conn.Send("PING")
-				if err := psc.Conn.Flush(); err != nil {
+				psconn.Conn.Send("PING")
+				if err := psconn.Conn.Flush(); err != nil {
 					done <- err
 					return
 				}
@@ -248,14 +246,14 @@ func (s *Sentinel) listenPing(psc redis.PubSubConn, stop <-chan bool) (done chan
 	return
 }
 
-func (s *Sentinel) listenReceive(conn redis.PubSubConn) (done chan error) {
+func (s *Sentinel) listenReceive(psconn redis.PubSubConn) (done chan error) {
 	done = make(chan error, 1)
 
 	go func(done chan error) {
 		defer close(done)
 
 		for {
-			switch v := conn.Receive().(type) {
+			switch v := psconn.Receive().(type) {
 			case redis.Subscription:
 				if v.Count == 0 {
 					return
@@ -316,7 +314,7 @@ func (s *Sentinel) handleNotification(msg redis.Message) {
 }
 
 func (s *Sentinel) getMasterAddr(conn redis.Conn, name string) (string, error) {
-	v, err := redis.Strings(conn.Do("SENTINEL", "get-master-addr-by-name", name))
+	res, err := redis.Strings(conn.Do("SENTINEL", "get-master-addr-by-name", name))
 	if err != nil {
 		if err == redis.ErrNil {
 			return "", errMasterNotFound
@@ -324,11 +322,11 @@ func (s *Sentinel) getMasterAddr(conn redis.Conn, name string) (string, error) {
 		return "", err
 	}
 
-	if len(v) != 2 {
+	if len(res) != 2 {
 		return "", errInvalidGetMasterAddrReply
 	}
 
-	return net.JoinHostPort(v[0], v[1]), nil
+	return net.JoinHostPort(res[0], res[1]), nil
 }
 
 func (s *Sentinel) getSlavesAddrs(conn redis.Conn, name string) ([]string, error) {
@@ -379,16 +377,16 @@ func (s *Sentinel) getRole(addr string) (string, error) {
 		return "", err
 	}
 
-	v, err := redis.Values(conn.Do("ROLE"))
+	vals, err := redis.Values(conn.Do("ROLE"))
 	if err != nil {
 		return "", err
 	}
 
-	if len(v) < 2 {
+	if len(vals) < 2 {
 		return "", errInvalidRoleReply
 	}
 
-	return redis.String(v[0], nil)
+	return redis.String(vals[0], nil)
 }
 
 // Stop initiates graceful shutdown of sentinel watcher.
