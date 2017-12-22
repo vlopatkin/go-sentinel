@@ -28,9 +28,14 @@ func (g *group) syncMaster(addr string) {
 
 func (g *group) slavesAddrs() []string {
 	g.mu.RLock()
-	defer g.mu.RUnlock()
 
-	return g.slaves
+	addrs := make([]string, len(g.slaves))
+
+	copy(addrs, g.slaves)
+
+	g.mu.RUnlock()
+
+	return addrs
 }
 
 func (g *group) syncSlaves(addrs []string) {
