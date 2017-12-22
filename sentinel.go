@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/garyburd/redigo/redis"
@@ -60,6 +61,7 @@ type Sentinel struct {
 	heartbeatTimeout  time.Duration
 
 	stop chan bool
+	wg   sync.WaitGroup
 }
 
 // New creates sentinel watcher with provided config
@@ -91,7 +93,10 @@ func (s *Sentinel) Run() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	s.wg.Add(1)
 	go func(ctx context.Context) {
+		defer s.wg.Done()
+
 		t := time.NewTicker(s.discoverInterval)
 
 		for {
@@ -106,6 +111,7 @@ func (s *Sentinel) Run() {
 		}
 	}(ctx)
 
+	s.wg.Add(1)
 	go s.listen(ctx)
 
 	<-s.stop
@@ -157,6 +163,8 @@ func (s *Sentinel) discoverGroup(conn redis.Conn, grp *group) error {
 }
 
 func (s *Sentinel) listen(ctx context.Context) {
+	defer s.wg.Done()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -390,5 +398,8 @@ func (s *Sentinel) Stop() {
 		return
 	}
 
-	s.stop <- true
+	close(s.stop)
+	s.wg.Wait()
+
+	s.stop = nil
 }
