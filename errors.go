@@ -9,5 +9,5 @@ var (
 	errMasterNotFound            = errors.New("master not found in redis sentinel")
 	errInvalidGetMasterAddrReply = errors.New("invalid sentinel get-master-addr-by-name reply")
 	errInvalidRoleReply          = errors.New("invalid role reply")
-	errInvalidMasterName         = errors.New("group for master name not configured in sentinel client")
+	errInvalidMasterName         = errors.New("master name not configured in sentinel client")
 )

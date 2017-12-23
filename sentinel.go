@@ -43,6 +43,9 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	// HeartbeatInterval represents timeout for pub/sub conn healthcheck reply
 	HeartbeatTimeout time.Duration
+
+	// ErrorHook for optional logging
+	ErrorHook func(prefix string, err error)
 }
 
 // Sentinel represents redis sentinel watcher
@@ -62,6 +65,8 @@ type Sentinel struct {
 
 	stop chan bool
 	wg   sync.WaitGroup
+
+	errorHook func(prefix string, err error)
 }
 
 // New creates sentinel watcher with provided config
@@ -69,9 +74,13 @@ func New(c *Config) *Sentinel {
 	groups := make(map[string]*group, len(c.Groups))
 
 	for _, name := range c.Groups {
-		groups[name] = &group{
-			name: name,
-		}
+		groups[name] = &group{name: name}
+	}
+
+	errorHook := c.ErrorHook
+	// nop error hook to avoid nil checks
+	if errorHook == nil {
+		errorHook = func(_prefix string, _err error) {}
 	}
 
 	return &Sentinel{
@@ -84,6 +93,7 @@ func New(c *Config) *Sentinel {
 		discoverRushInterval: c.DiscoverRushInterval,
 		heartbeatInterval:    c.HeartbeatInterval,
 		heartbeatTimeout:     c.HeartbeatTimeout,
+		errorHook:            errorHook,
 	}
 }
 
@@ -97,12 +107,32 @@ func (s *Sentinel) Run() {
 	go func(ctx context.Context) {
 		defer s.wg.Done()
 
+		if err := s.discover(); err != nil {
+			s.errorHook("initial discover error", err)
+		}
+
+		rushing := false
+
 		t := time.NewTicker(s.discoverInterval)
 
 		for {
 			select {
 			case <-t.C:
-				s.discover()
+				err := s.discover()
+				if err != nil {
+					s.errorHook("discover error", err)
+
+					if !rushing {
+						t.Stop()
+						t = time.NewTicker(s.discoverRushInterval)
+						rushing = true
+					}
+
+				} else if rushing {
+					t.Stop()
+					t = time.NewTicker(s.discoverInterval)
+					rushing = false
+				}
 
 			case <-ctx.Done():
 				t.Stop()
@@ -133,7 +163,9 @@ func (s *Sentinel) discover() error {
 	defer conn.Close()
 
 	for _, grp := range s.groups {
-		s.discoverGroup(conn, grp)
+		if err := s.discoverGroup(conn, grp); err != nil {
+			s.errorHook(fmt.Sprintf("discover %s error", grp.name), err)
+		}
 	}
 
 	return nil
@@ -180,6 +212,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 		)
 
 		if err != nil {
+			s.errorHook("listen conn dial error", err)
 			time.Sleep(listenRetryTimeout)
 			continue
 		}
@@ -188,6 +221,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		err = psconn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
 		if err != nil {
+			s.errorHook("listen subscribe error", err)
 			psconn.Close()
 			continue
 		}
@@ -198,15 +232,25 @@ func (s *Sentinel) listen(ctx context.Context) {
 		pingDone := s.listenPing(psconn, stopPing)
 
 		select {
-		case <-recvDone:
+		case err := <-recvDone:
+			if err != nil {
+				s.errorHook("listen receive error", err)
+			}
+
 			close(stopPing)
+
 			psconn.Close()
 
-		case <-pingDone:
+		case err := <-pingDone:
+			if err != nil {
+				s.errorHook("listen conn ping error", err)
+			}
+
 			psconn.Close()
 
 		case <-ctx.Done():
 			psconn.Unsubscribe()
+
 			close(stopPing)
 
 			<-recvDone
