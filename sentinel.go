@@ -97,6 +97,7 @@ func New(c *Config) *Sentinel {
 	}
 }
 
+// MasterAddr returns current master address for master name
 func (s *Sentinel) MasterAddr(name string) (string, error) {
 	if grp, ok := s.groups[name]; ok {
 		if addr := grp.getMaster(); addr != "" {
@@ -108,7 +109,8 @@ func (s *Sentinel) MasterAddr(name string) (string, error) {
 	return "", errInvalidMasterName
 }
 
-func (s *Sentinel) SlavesAddrs(name string) ([]string, error) {
+// SlaveAddrs returns reachable slave addresses for master name
+func (s *Sentinel) SlaveAddrs(name string) ([]string, error) {
 	if grp, ok := s.groups[name]; ok {
 		return grp.getSlaves(), nil
 	}
@@ -203,7 +205,7 @@ func (s *Sentinel) discoverGroup(conn redis.Conn, grp *group) error {
 
 	grp.syncMaster(master)
 
-	slaves, err := s.getSlavesAddrs(conn, grp.name)
+	slaves, err := s.getSlaveAddrs(conn, grp.name)
 	if err != nil {
 		return err
 	}
@@ -392,7 +394,7 @@ func (s *Sentinel) getMasterAddr(conn redis.Conn, name string) (string, error) {
 	return net.JoinHostPort(res[0], res[1]), nil
 }
 
-func (s *Sentinel) getSlavesAddrs(conn redis.Conn, name string) ([]string, error) {
+func (s *Sentinel) getSlaveAddrs(conn redis.Conn, name string) ([]string, error) {
 	vals, err := redis.Values(conn.Do("SENTINEL", "slaves", name))
 	if err != nil {
 		return nil, err
