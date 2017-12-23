@@ -97,6 +97,25 @@ func New(c *Config) *Sentinel {
 	}
 }
 
+func (s *Sentinel) MasterAddr(name string) (string, error) {
+	if grp, ok := s.groups[name]; ok {
+		if addr := grp.getMaster(); addr != "" {
+			return addr, nil
+		}
+		return "", errMasterUnavailable
+	}
+
+	return "", errInvalidMasterName
+}
+
+func (s *Sentinel) SlavesAddrs(name string) ([]string, error) {
+	if grp, ok := s.groups[name]; ok {
+		return grp.getSlaves(), nil
+	}
+
+	return nil, errInvalidMasterName
+}
+
 // Run starts sentinel watcher discover and pub/sub listen
 func (s *Sentinel) Run() {
 	s.stop = make(chan bool)

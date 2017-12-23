@@ -12,7 +12,7 @@ type group struct {
 	slaves []string
 }
 
-func (g *group) masterAddr() string {
+func (g *group) getMaster() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
@@ -26,7 +26,7 @@ func (g *group) syncMaster(addr string) {
 	g.master = addr
 }
 
-func (g *group) slavesAddrs() []string {
+func (g *group) getSlaves() []string {
 	g.mu.RLock()
 
 	addrs := make([]string, len(g.slaves))
