@@ -36,8 +36,6 @@ type Config struct {
 
 	// DiscoverInterval represents interval for redis instances discover
 	DiscoverInterval time.Duration
-	// DiscoverRushInterval represents interval for redis instances discover in case of error occurred
-	DiscoverRushInterval time.Duration
 
 	// HeartbeatInterval represents pub/sub conn healthcheck interval
 	HeartbeatInterval time.Duration
@@ -57,8 +55,7 @@ type Sentinel struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 
-	discoverInterval     time.Duration
-	discoverRushInterval time.Duration
+	discoverInterval time.Duration
 
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -84,16 +81,15 @@ func New(c *Config) *Sentinel {
 	}
 
 	return &Sentinel{
-		addr:                 c.Addr,
-		groups:               groups,
-		dialTimeout:          c.DialTimeout,
-		readTimeout:          c.ReadTimeout,
-		writeTimeout:         c.WriteTimeout,
-		discoverInterval:     c.DiscoverInterval,
-		discoverRushInterval: c.DiscoverRushInterval,
-		heartbeatInterval:    c.HeartbeatInterval,
-		heartbeatTimeout:     c.HeartbeatTimeout,
-		errorHook:            errorHook,
+		addr:              c.Addr,
+		groups:            groups,
+		dialTimeout:       c.DialTimeout,
+		readTimeout:       c.ReadTimeout,
+		writeTimeout:      c.WriteTimeout,
+		discoverInterval:  c.DiscoverInterval,
+		heartbeatInterval: c.HeartbeatInterval,
+		heartbeatTimeout:  c.HeartbeatTimeout,
+		errorHook:         errorHook,
 	}
 }
 
@@ -103,6 +99,7 @@ func (s *Sentinel) MasterAddr(name string) (string, error) {
 		if addr := grp.getMaster(); addr != "" {
 			return addr, nil
 		}
+
 		return "", errMasterUnavailable
 	}
 
@@ -132,27 +129,13 @@ func (s *Sentinel) Run() {
 			s.errorHook("initial discover error", err)
 		}
 
-		rushing := false
-
 		t := time.NewTicker(s.discoverInterval)
 
 		for {
 			select {
 			case <-t.C:
-				err := s.discover()
-				if err != nil {
+				if err := s.discover(); err != nil {
 					s.errorHook("discover error", err)
-
-					if !rushing {
-						t.Stop()
-						t = time.NewTicker(s.discoverRushInterval)
-						rushing = true
-					}
-
-				} else if rushing {
-					t.Stop()
-					t = time.NewTicker(s.discoverInterval)
-					rushing = false
 				}
 
 			case <-ctx.Done():
