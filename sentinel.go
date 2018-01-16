@@ -17,6 +17,11 @@ const (
 )
 
 var (
+	defaultDiscoverInterval = 30 * time.Second
+
+	defaultHeartbeatInterval = 15 * time.Second
+	defaultHeartbeatTimeout  = 5 * time.Second
+
 	listenRetryTimeout = 1 * time.Second
 )
 
@@ -42,8 +47,8 @@ type Config struct {
 	// HeartbeatInterval represents timeout for pub/sub conn healthcheck reply
 	HeartbeatTimeout time.Duration
 
-	// ErrorHook for optional logging
-	ErrorHook func(prefix string, err error)
+	// OnError hook for optional logging
+	OnError func(err error)
 }
 
 // Sentinel represents redis sentinel watcher
@@ -63,7 +68,7 @@ type Sentinel struct {
 	stop chan bool
 	wg   sync.WaitGroup
 
-	errorHook func(prefix string, err error)
+	onError func(err error)
 }
 
 // New creates sentinel watcher with provided config
@@ -74,10 +79,25 @@ func New(c *Config) *Sentinel {
 		groups[name] = &group{name: name}
 	}
 
-	errorHook := c.ErrorHook
+	onError := c.OnError
 	// nop error hook to avoid nil checks
-	if errorHook == nil {
-		errorHook = func(_prefix string, _err error) {}
+	if onError == nil {
+		onError = func(_err error) {}
+	}
+
+	discoverInterval := c.DiscoverInterval
+	if discoverInterval < 1 {
+		discoverInterval = defaultDiscoverInterval
+	}
+
+	heartbeatInterval := c.HeartbeatInterval
+	if heartbeatInterval < 1 {
+		heartbeatInterval = defaultHeartbeatInterval
+	}
+
+	heartbeatTimeout := c.HeartbeatTimeout
+	if heartbeatTimeout < 1 {
+		heartbeatTimeout = defaultHeartbeatTimeout
 	}
 
 	return &Sentinel{
@@ -86,10 +106,10 @@ func New(c *Config) *Sentinel {
 		dialTimeout:       c.DialTimeout,
 		readTimeout:       c.ReadTimeout,
 		writeTimeout:      c.WriteTimeout,
-		discoverInterval:  c.DiscoverInterval,
-		heartbeatInterval: c.HeartbeatInterval,
-		heartbeatTimeout:  c.HeartbeatTimeout,
-		errorHook:         errorHook,
+		discoverInterval:  discoverInterval,
+		heartbeatInterval: heartbeatInterval,
+		heartbeatTimeout:  heartbeatTimeout,
+		onError:           onError,
 	}
 }
 
@@ -126,7 +146,7 @@ func (s *Sentinel) Run() {
 		defer s.wg.Done()
 
 		if err := s.discover(); err != nil {
-			s.errorHook("initial discover error", err)
+			s.onError(&RunError{"initial discover error", err})
 		}
 
 		t := time.NewTicker(s.discoverInterval)
@@ -135,7 +155,7 @@ func (s *Sentinel) Run() {
 			select {
 			case <-t.C:
 				if err := s.discover(); err != nil {
-					s.errorHook("discover error", err)
+					s.onError(&RunError{"discover error", err})
 				}
 
 			case <-ctx.Done():
@@ -168,7 +188,7 @@ func (s *Sentinel) discover() error {
 
 	for _, grp := range s.groups {
 		if err := s.discoverGroup(conn, grp); err != nil {
-			s.errorHook(fmt.Sprintf("discover %s error", grp.name), err)
+			s.onError(&RunError{fmt.Sprintf("discover %s error", grp.name), err})
 		}
 	}
 
@@ -216,7 +236,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 		)
 
 		if err != nil {
-			s.errorHook("listen conn dial error", err)
+			s.onError(&RunError{"listen conn dial error", err})
 			time.Sleep(listenRetryTimeout)
 			continue
 		}
@@ -225,7 +245,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		err = psconn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
 		if err != nil {
-			s.errorHook("listen subscribe error", err)
+			s.onError(&RunError{"listen subscribe error", err})
 			psconn.Close()
 			continue
 		}
@@ -238,7 +258,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 		select {
 		case err := <-recvDone:
 			if err != nil {
-				s.errorHook("listen receive error", err)
+				s.onError(&RunError{"listen receive error", err})
 			}
 
 			close(stopPing)
@@ -247,7 +267,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		case err := <-pingDone:
 			if err != nil {
-				s.errorHook("listen conn ping error", err)
+				s.onError(&RunError{"listen conn ping error", err})
 			}
 
 			psconn.Close()

@@ -1,6 +1,9 @@
 package sentinel
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	errMasterUnavailable         = errors.New("cannot discover master from sentinel")
@@ -9,3 +12,12 @@ var (
 	errInvalidRoleReply          = errors.New("invalid role reply")
 	errInvalidMasterName         = errors.New("master name not configured")
 )
+
+type RunError struct {
+	title string
+	err   error
+}
+
+func (e *RunError) Error() string {
+	return fmt.Sprintf("%s: %s", e.title, e.err.Error())
+}
