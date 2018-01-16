@@ -27,8 +27,8 @@ var (
 
 // Config represents sentinel watcher config
 type Config struct {
-	// Addr represents redis sentinel address
-	Addr string
+	// Hosts represents redis sentinels hosts
+	Hosts []string
 	// Groups represents list of groups (master names) to discover
 	Groups []string
 
@@ -53,7 +53,10 @@ type Config struct {
 
 // Sentinel represents redis sentinel watcher
 type Sentinel struct {
-	addr   string
+	mu    sync.RWMutex
+	hosts []string
+	pos   int
+
 	groups map[string]*group
 
 	dialTimeout  time.Duration
@@ -73,6 +76,10 @@ type Sentinel struct {
 
 // New creates sentinel watcher with provided config
 func New(c *Config) *Sentinel {
+	if len(c.Hosts) == 0 {
+		panic("at least 1 sentinel host is required")
+	}
+
 	groups := make(map[string]*group, len(c.Groups))
 
 	for _, name := range c.Groups {
@@ -82,7 +89,7 @@ func New(c *Config) *Sentinel {
 	onError := c.OnError
 	// nop error hook to avoid nil checks
 	if onError == nil {
-		onError = func(_err error) {}
+		onError = func(err error) {}
 	}
 
 	discoverInterval := c.DiscoverInterval
@@ -101,7 +108,7 @@ func New(c *Config) *Sentinel {
 	}
 
 	return &Sentinel{
-		addr:              c.Addr,
+		hosts:             c.Hosts,
 		groups:            groups,
 		dialTimeout:       c.DialTimeout,
 		readTimeout:       c.ReadTimeout,
@@ -173,14 +180,30 @@ func (s *Sentinel) Run() {
 	cancel()
 }
 
+// Stop initiates graceful shutdown of sentinel watcher.
+// It blocks until all connections are released
+func (s *Sentinel) Stop() {
+	if s.stop == nil {
+		return
+	}
+
+	close(s.stop)
+	s.wg.Wait()
+
+	s.stop = nil
+}
+
 func (s *Sentinel) discover() error {
-	conn, err := redis.Dial("tcp", s.addr,
+	host := s.host()
+
+	conn, err := redis.Dial("tcp", host,
 		redis.DialConnectTimeout(s.dialTimeout),
 		redis.DialReadTimeout(s.readTimeout),
 		redis.DialWriteTimeout(s.writeTimeout),
 	)
 
 	if err != nil {
+		s.shiftHost(host)
 		return err
 	}
 
@@ -229,13 +252,16 @@ func (s *Sentinel) listen(ctx context.Context) {
 			break
 		}
 
-		conn, err := redis.Dial("tcp", s.addr,
+		host := s.host()
+
+		conn, err := redis.Dial("tcp", host,
 			redis.DialConnectTimeout(s.dialTimeout),
 			redis.DialReadTimeout(s.heartbeatInterval+s.heartbeatTimeout),
 			redis.DialWriteTimeout(s.writeTimeout),
 		)
 
 		if err != nil {
+			s.shiftHost(host)
 			s.onError(&RunError{"listen conn dial error", err})
 			time.Sleep(listenRetryTimeout)
 			continue
@@ -457,15 +483,21 @@ func (s *Sentinel) getRole(addr string) (string, error) {
 	return redis.String(vals[0], nil)
 }
 
-// Stop initiates graceful shutdown of sentinel watcher.
-// It blocks until all connections released
-func (s *Sentinel) Stop() {
-	if s.stop == nil {
+func (s *Sentinel) host() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.hosts[s.pos]
+}
+
+func (s *Sentinel) shiftHost(host string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// already bypassed by another goroutine
+	if s.hosts[s.pos] != host {
 		return
 	}
 
-	close(s.stop)
-	s.wg.Wait()
-
-	s.stop = nil
+	s.pos = (s.pos + 1) % len(s.hosts)
 }

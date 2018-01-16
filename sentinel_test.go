@@ -8,7 +8,7 @@ import (
 
 func TestHandleNotification_SwitchMaster(t *testing.T) {
 	snt := New(&Config{
-		Addr:   "172.16.0.1:26379",
+		Hosts:  []string{"172.16.0.1:26379"},
 		Groups: []string{"master1"},
 	})
 
