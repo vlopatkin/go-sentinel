@@ -153,7 +153,7 @@ func (s *Sentinel) Run() {
 		defer s.wg.Done()
 
 		if err := s.discover(); err != nil {
-			s.onError(&RunError{"initial discover error", err})
+			s.onError(fmt.Errorf("initial discover error: %s", err))
 		}
 
 		t := time.NewTicker(s.discoverInterval)
@@ -162,7 +162,7 @@ func (s *Sentinel) Run() {
 			select {
 			case <-t.C:
 				if err := s.discover(); err != nil {
-					s.onError(&RunError{"discover error", err})
+					s.onError(fmt.Errorf("discover error: %s", err))
 				}
 
 			case <-ctx.Done():
@@ -211,7 +211,7 @@ func (s *Sentinel) discover() error {
 
 	for _, grp := range s.groups {
 		if err := s.discoverGroup(conn, grp); err != nil {
-			s.onError(&RunError{fmt.Sprintf("discover %s error", grp.name), err})
+			s.onError(fmt.Errorf("discover %s error: %s", grp.name, err))
 		}
 	}
 
@@ -262,7 +262,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		if err != nil {
 			s.shiftHost(host)
-			s.onError(&RunError{"listen conn dial error", err})
+			s.onError(fmt.Errorf("listen conn dial error: %s", err))
 			time.Sleep(listenRetryTimeout)
 			continue
 		}
@@ -271,7 +271,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		err = psconn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
 		if err != nil {
-			s.onError(&RunError{"listen subscribe error", err})
+			s.onError(fmt.Errorf("listen subscribe error: %s", err))
 			psconn.Close()
 			continue
 		}
@@ -284,7 +284,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 		select {
 		case err := <-recvDone:
 			if err != nil {
-				s.onError(&RunError{"listen receive error", err})
+				s.onError(fmt.Errorf("listen recv error: %s", err))
 			}
 
 			close(stopPing)
@@ -293,7 +293,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		case err := <-pingDone:
 			if err != nil {
-				s.onError(&RunError{"listen conn ping error", err})
+				s.onError(fmt.Errorf("listen conn ping error: %s", err))
 			}
 
 			psconn.Close()
