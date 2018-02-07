@@ -127,10 +127,10 @@ func (s *Sentinel) MasterAddr(name string) (string, error) {
 			return addr, nil
 		}
 
-		return "", errMasterUnavailable
+		return "", ErrMasterUnavailable
 	}
 
-	return "", errInvalidMasterName
+	return "", ErrInvalidMasterName
 }
 
 // SlaveAddrs returns reachable slave addresses for master name
@@ -139,7 +139,7 @@ func (s *Sentinel) SlaveAddrs(name string) ([]string, error) {
 		return grp.getSlaves(), nil
 	}
 
-	return nil, errInvalidMasterName
+	return nil, ErrInvalidMasterName
 }
 
 // Run starts sentinel watcher discover and pub/sub listen
@@ -411,13 +411,13 @@ func (s *Sentinel) getMasterAddr(conn redis.Conn, name string) (string, error) {
 	res, err := redis.Strings(conn.Do("SENTINEL", "get-master-addr-by-name", name))
 	if err != nil {
 		if err == redis.ErrNil {
-			return "", errMasterNotFound
+			return "", ErrMasterNotFound
 		}
 		return "", err
 	}
 
 	if len(res) != 2 {
-		return "", errInvalidGetMasterAddrReply
+		return "", ErrInvalidGetMasterAddrReply
 	}
 
 	return net.JoinHostPort(res[0], res[1]), nil
@@ -477,7 +477,7 @@ func (s *Sentinel) getRole(addr string) (string, error) {
 	}
 
 	if len(vals) < 2 {
-		return "", errInvalidRoleReply
+		return "", ErrInvalidRoleReply
 	}
 
 	return redis.String(vals[0], nil)
