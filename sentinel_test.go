@@ -13,7 +13,7 @@ func TestGetMasterAddr(t *testing.T) {
 
 	snt := &Sentinel{
 		groups: map[string]*group{
-			masterName: &group{
+			masterName: {
 				master: masterAddr,
 			},
 		},
@@ -35,7 +35,7 @@ func TestGetMasterAddr_NotDiscovered(t *testing.T) {
 
 	snt := &Sentinel{
 		groups: map[string]*group{
-			masterName: &group{},
+			masterName: {},
 		},
 	}
 
@@ -72,7 +72,7 @@ func TestGetSlavesAddrs(t *testing.T) {
 
 	snt := &Sentinel{
 		groups: map[string]*group{
-			masterName: &group{
+			masterName: {
 				slaves: slavesAddrs,
 			},
 		},
@@ -108,7 +108,7 @@ func TestHandleNotification_SwitchMaster(t *testing.T) {
 
 	snt := &Sentinel{
 		groups: map[string]*group{
-			masterName: &group{
+			masterName: {
 				master: "172.16.0.1:6379",
 			},
 		},
