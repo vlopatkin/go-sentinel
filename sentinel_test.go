@@ -7,88 +7,92 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-func TestMasterAddr(t *testing.T) {
+func TestGetMasterAddr(t *testing.T) {
+	masterName := "master1"
 	masterAddr := "172.16.0.1:6379"
 
 	snt := &Sentinel{
 		groups: map[string]*group{
-			"master1": &group{
+			masterName: &group{
 				master: masterAddr,
 			},
 		},
 	}
 
-	addr, err := snt.MasterAddr("master1")
+	addr, err := snt.GetMasterAddr(masterName)
 
 	if err != nil {
 		t.Errorf("expected nil error\ngot: %v", err)
 	}
 
 	if addr != masterAddr {
-		t.Errorf("expected addr: %v\ngot: %v", masterAddr, addr)
+		t.Errorf("expected addr: %s\ngot: %s", masterAddr, addr)
 	}
 }
 
-func TestMasterAddr_NotDiscovered(t *testing.T) {
+func TestGetMasterAddr_NotDiscovered(t *testing.T) {
+	masterName := "master1"
+
 	snt := &Sentinel{
 		groups: map[string]*group{
-			"master1": &group{},
+			masterName: &group{},
 		},
 	}
 
-	addr, err := snt.MasterAddr("master1")
+	addr, err := snt.GetMasterAddr(masterName)
 
 	if err != ErrMasterUnavailable {
 		t.Errorf("expected error: %v\ngot: %v", ErrMasterUnavailable, err)
 	}
 
 	if addr != "" {
-		t.Errorf("expected empty addr\ngot: %v", addr)
+		t.Errorf("expected empty addr\ngot: %s", addr)
 	}
 }
 
-func TestMasterAddr_NotRegistered(t *testing.T) {
+func TestGetMasterAddr_NotRegistered(t *testing.T) {
 	snt := &Sentinel{}
 
-	addr, err := snt.MasterAddr("master1")
+	addr, err := snt.GetMasterAddr("master1")
 
 	if err != ErrInvalidMasterName {
 		t.Errorf("expected error: %v\ngot: %v", ErrInvalidMasterName, err)
 	}
 
 	if addr != "" {
-		t.Errorf("expected empty addr\ngot: %v", addr)
+		t.Errorf("expected empty addr\ngot: %s", addr)
 	}
 }
 
-func TestSlaveAddrs(t *testing.T) {
+func TestGetSlavesAddrs(t *testing.T) {
+	masterName := "master1"
 	slavesAddrs := []string{
 		"172.16.0.1:6379", "172.16.0.1:6380",
 	}
 
 	snt := &Sentinel{
 		groups: map[string]*group{
-			"master1": &group{
+			masterName: &group{
 				slaves: slavesAddrs,
 			},
 		},
 	}
 
-	addrs, err := snt.SlaveAddrs("master1")
+	addrs, err := snt.GetSlavesAddrs(masterName)
 
 	if err != nil {
 		t.Errorf("expected nil error\ngot: %v", err)
 	}
 
 	if !reflect.DeepEqual(addrs, slavesAddrs) {
-		t.Errorf("expected addrs: %v\ngot: %v", slavesAddrs, addrs)
+		t.Errorf("expected addrs: %s\ngot: %s", slavesAddrs, addrs)
 	}
 }
 
-func TestSlaveAddrs_NotRegistered(t *testing.T) {
+func TestGetSlavesAddrs_NotRegistered(t *testing.T) {
 	snt := &Sentinel{}
 
-	addrs, err := snt.SlaveAddrs("master1")
+	addrs, err := snt.GetSlavesAddrs("master1")
 
 	if err != ErrInvalidMasterName {
 		t.Errorf("expected error: %v\ngot: %v", ErrInvalidMasterName, err)
@@ -100,9 +104,11 @@ func TestSlaveAddrs_NotRegistered(t *testing.T) {
 }
 
 func TestHandleNotification_SwitchMaster(t *testing.T) {
+	masterName := "master1"
+
 	snt := &Sentinel{
 		groups: map[string]*group{
-			"master1": &group{
+			masterName: &group{
 				master: "172.16.0.1:6379",
 			},
 		},
@@ -115,23 +121,43 @@ func TestHandleNotification_SwitchMaster(t *testing.T) {
 		Data:    []byte("master1 172.16.0.1 6379 172.16.0.2 6380"),
 	})
 
-	addr := snt.groups["master1"].master
+	addr := snt.groups[masterName].master
 
 	if addr != exp {
 		t.Errorf("expected addr: %s\ngot: %s", exp, addr)
 	}
 }
 
+func Test_Addrs(t *testing.T) {
+	addrs := []string{"172.16.0.1:26379", "172.16.0.2:26379"}
+
+	snt := &Sentinel{addrs: addrs}
+
+	addr := snt.getAddr()
+
+	if addr != addrs[0] {
+		t.Errorf("expected addr: %s\ngot: %s", addrs[0], addr)
+	}
+
+	snt.shiftAddr(addr)
+
+	addr = snt.getAddr()
+
+	if addr != addrs[1] {
+		t.Errorf("expected addr: %s\ngot: %s", addrs[1], addr)
+	}
+}
+
 func TestNew(t *testing.T) {
-	hosts := []string{"172.16.0.1:26379"}
+	addrs := []string{"172.16.0.1:26379"}
 	groups := []string{"master1", "master2"}
 
 	snt := New(&Config{
-		Hosts:  hosts,
+		Addrs:  addrs,
 		Groups: groups,
 	})
 
-	if !reflect.DeepEqual(snt.hosts, hosts) {
-		t.Errorf("expected hosts: %v\ngot: %v", hosts, snt.hosts)
+	if !reflect.DeepEqual(snt.addrs, addrs) {
+		t.Errorf("expected addrs: %v\ngot: %v", addrs, snt.addrs)
 	}
 }
