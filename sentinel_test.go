@@ -139,7 +139,7 @@ func Test_Addrs(t *testing.T) {
 		t.Errorf("expected addr: %s\ngot: %s", addrs[0], addr)
 	}
 
-	snt.shiftAddr(addr)
+	snt.shiftAddr()
 
 	addr = snt.getAddr()
 
