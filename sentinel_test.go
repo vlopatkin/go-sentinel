@@ -121,10 +121,48 @@ func TestHandleNotification_SwitchMaster(t *testing.T) {
 		Data:    []byte("master1 172.16.0.1 6379 172.16.0.2 6380"),
 	})
 
-	addr := snt.groups[masterName].master
+	master, _ := snt.GetMasterAddr(masterName)
 
-	if addr != exp {
-		t.Errorf("expected addr: %s\ngot: %s", exp, addr)
+	if master != exp {
+		t.Errorf("expected master: %s\ngot: %s", exp, master)
+	}
+}
+
+func TestHandleNotification_SlaveUp(t *testing.T) {
+	masterName := "master1"
+
+	snt := &Sentinel{
+		groups: map[string]*group{
+			masterName: {
+				slaves: []string{},
+			},
+		},
+	}
+
+	snt.handleNotification(redis.Message{
+		Channel: "+slave",
+		Data:    []byte("slave <name> 172.16.0.1 6380 @ master1 172.16.0.1 6379"),
+	})
+
+	exp := []string{"172.16.0.1:6380"}
+
+	slaves, _ := snt.GetSlavesAddrs(masterName)
+
+	if !reflect.DeepEqual(slaves, exp) {
+		t.Errorf("expected slaves: %s\ngot: %s", exp, slaves)
+	}
+
+	snt.handleNotification(redis.Message{
+		Channel: "-sdown",
+		Data:    []byte("slave <name> 172.16.0.1 6381 @ master1 172.16.0.1 6379"),
+	})
+
+	exp = append(exp, "172.16.0.1:6381")
+
+	slaves, _ = snt.GetSlavesAddrs(masterName)
+
+	if !reflect.DeepEqual(slaves, exp) {
+		t.Errorf("expected slaves: %s\ngot: %s", exp, slaves)
 	}
 }
 
