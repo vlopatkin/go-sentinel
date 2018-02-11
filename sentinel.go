@@ -252,7 +252,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		if err != nil {
 			s.shiftAddr()
-			s.onError(fmt.Errorf("pub/sub conn %s", err))
+			s.onError(fmt.Errorf("pub/sub %s", err))
 			time.Sleep(listenRetryTimeout)
 			continue
 		}
@@ -261,7 +261,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		err = psconn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
 		if err != nil {
-			s.onError(fmt.Errorf("pub/sub conn %s", err))
+			s.onError(fmt.Errorf("pub/sub subscribe %s", err))
 			psconn.Close()
 			continue
 		}
@@ -274,7 +274,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 		select {
 		case err := <-recvDone:
 			if err != nil {
-				s.onError(fmt.Errorf("pub/sub conn receive %s", err))
+				s.onError(fmt.Errorf("pub/sub receive %s", err))
 			}
 
 			close(stopPing)
@@ -283,7 +283,7 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		case err := <-pingDone:
 			if err != nil {
-				s.onError(fmt.Errorf("pub/sub conn ping %s", err))
+				s.onError(fmt.Errorf("pub/sub ping %s", err))
 			}
 
 			psconn.Close()
