@@ -1,10 +1,10 @@
 package sentinel
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/garyburd/redigo/redis"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetMasterAddr(t *testing.T) {
@@ -21,13 +21,8 @@ func TestGetMasterAddr(t *testing.T) {
 
 	addr, err := snt.GetMasterAddr(masterName)
 
-	if err != nil {
-		t.Errorf("expected nil error\ngot: %v", err)
-	}
-
-	if addr != masterAddr {
-		t.Errorf("expected addr: %s\ngot: %s", masterAddr, addr)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, masterAddr, addr)
 }
 
 func TestGetMasterAddr_NotDiscovered(t *testing.T) {
@@ -41,13 +36,8 @@ func TestGetMasterAddr_NotDiscovered(t *testing.T) {
 
 	addr, err := snt.GetMasterAddr(masterName)
 
-	if err != ErrMasterUnavailable {
-		t.Errorf("expected error: %v\ngot: %v", ErrMasterUnavailable, err)
-	}
-
-	if addr != "" {
-		t.Errorf("expected empty addr\ngot: %s", addr)
-	}
+	assert.Equal(t, ErrMasterUnavailable, err)
+	assert.Empty(t, addr)
 }
 
 func TestGetMasterAddr_NotRegistered(t *testing.T) {
@@ -55,13 +45,8 @@ func TestGetMasterAddr_NotRegistered(t *testing.T) {
 
 	addr, err := snt.GetMasterAddr("master1")
 
-	if err != ErrInvalidMasterName {
-		t.Errorf("expected error: %v\ngot: %v", ErrInvalidMasterName, err)
-	}
-
-	if addr != "" {
-		t.Errorf("expected empty addr\ngot: %s", addr)
-	}
+	assert.Equal(t, ErrInvalidMasterName, err)
+	assert.Empty(t, addr)
 }
 
 func TestGetSlavesAddrs(t *testing.T) {
@@ -80,13 +65,8 @@ func TestGetSlavesAddrs(t *testing.T) {
 
 	addrs, err := snt.GetSlavesAddrs(masterName)
 
-	if err != nil {
-		t.Errorf("expected nil error\ngot: %v", err)
-	}
-
-	if !reflect.DeepEqual(addrs, slavesAddrs) {
-		t.Errorf("expected addrs: %s\ngot: %s", slavesAddrs, addrs)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, slavesAddrs, addrs)
 }
 
 func TestGetSlavesAddrs_NotRegistered(t *testing.T) {
@@ -94,13 +74,8 @@ func TestGetSlavesAddrs_NotRegistered(t *testing.T) {
 
 	addrs, err := snt.GetSlavesAddrs("master1")
 
-	if err != ErrInvalidMasterName {
-		t.Errorf("expected error: %v\ngot: %v", ErrInvalidMasterName, err)
-	}
-
-	if addrs != nil {
-		t.Errorf("expected empty addrs\ngot: %v", addrs)
-	}
+	assert.Equal(t, ErrInvalidMasterName, err)
+	assert.Nil(t, addrs)
 }
 
 func TestHandleNotification_SwitchMaster(t *testing.T) {
@@ -114,18 +89,15 @@ func TestHandleNotification_SwitchMaster(t *testing.T) {
 		},
 	}
 
-	exp := "172.16.0.2:6380"
-
 	snt.handleNotification(redis.Message{
 		Channel: "+switch-master",
 		Data:    []byte("master1 172.16.0.1 6379 172.16.0.2 6380"),
 	})
 
-	master, _ := snt.GetMasterAddr(masterName)
+	master, err := snt.GetMasterAddr(masterName)
 
-	if master != exp {
-		t.Errorf("expected master: %s\ngot: %s", exp, master)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, "172.16.0.2:6380", master)
 }
 
 func TestHandleNotification_SlaveUp(t *testing.T) {
@@ -144,58 +116,58 @@ func TestHandleNotification_SlaveUp(t *testing.T) {
 		Data:    []byte("slave <name> 172.16.0.1 6380 @ master1 172.16.0.1 6379"),
 	})
 
-	exp := []string{"172.16.0.1:6380"}
+	slaves, err := snt.GetSlavesAddrs(masterName)
 
-	slaves, _ := snt.GetSlavesAddrs(masterName)
-
-	if !reflect.DeepEqual(slaves, exp) {
-		t.Errorf("expected slaves: %s\ngot: %s", exp, slaves)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, []string{"172.16.0.1:6380"}, slaves)
 
 	snt.handleNotification(redis.Message{
 		Channel: "-sdown",
 		Data:    []byte("slave <name> 172.16.0.1 6381 @ master1 172.16.0.1 6379"),
 	})
 
-	exp = append(exp, "172.16.0.1:6381")
+	slaves, err = snt.GetSlavesAddrs(masterName)
 
-	slaves, _ = snt.GetSlavesAddrs(masterName)
-
-	if !reflect.DeepEqual(slaves, exp) {
-		t.Errorf("expected slaves: %s\ngot: %s", exp, slaves)
-	}
+	assert.Nil(t, err)
+	assert.Equal(t, []string{"172.16.0.1:6380", "172.16.0.1:6381"}, slaves)
 }
 
 func Test_Addrs(t *testing.T) {
-	addrs := []string{"172.16.0.1:26379", "172.16.0.2:26379"}
+	addrs := []string{
+		"172.16.0.1:26379",
+		"172.16.0.2:26379",
+	}
 
 	snt := &Sentinel{addrs: addrs}
 
-	addr := snt.getAddr()
-
-	if addr != addrs[0] {
-		t.Errorf("expected addr: %s\ngot: %s", addrs[0], addr)
-	}
+	assert.Equal(t, addrs[0], snt.getAddr())
 
 	snt.shiftAddr()
 
-	addr = snt.getAddr()
-
-	if addr != addrs[1] {
-		t.Errorf("expected addr: %s\ngot: %s", addrs[1], addr)
-	}
+	assert.Equal(t, addrs[1], snt.getAddr())
 }
 
 func TestNew(t *testing.T) {
-	addrs := []string{"172.16.0.1:26379"}
-	groups := []string{"master1", "master2"}
+	addrs := []string{
+		"172.16.0.1:26379",
+	}
+
+	groups := []string{
+		"master1",
+		"master2",
+	}
 
 	snt := New(&Config{
 		Addrs:  addrs,
 		Groups: groups,
 	})
 
-	if !reflect.DeepEqual(snt.addrs, addrs) {
-		t.Errorf("expected addrs: %v\ngot: %v", addrs, snt.addrs)
+	sntGroups := make([]string, 0)
+
+	for name := range snt.groups {
+		sntGroups = append(sntGroups, name)
 	}
+
+	assert.Equal(t, addrs, snt.addrs)
+	assert.Equal(t, groups, sntGroups)
 }
