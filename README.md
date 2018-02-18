@@ -12,3 +12,30 @@ Installation
 Install go-sentinel using the "go get" command:
 
     go get github.com/arwx/go-sentinel
+
+Documentation
+-------------
+See [godoc](https://godoc.org/github.com/arwx/go-sentinel) for package and API descriptions
+
+Usage
+-----
+
+```golang
+// create sentinel watcher with minimal config
+snt := sentinel.New(&sentinel.Config{
+    Addrs:  []string{"localhost:26379"},
+    Groups: []string{"example"},
+})
+
+// run redis instances discovery for configured groups
+// and pub/sub listening for +switch-master, +slave, +sdown, -sdown events
+go snt.Run()
+
+defer snt.Stop()
+
+// get master redis instance for 'example' master name
+master, err := snt.GetMasterAddr("example")
+
+// get slave redis instances for 'example' master name
+slaves, err := snt.GetSlavesAddrs("example")
+```
