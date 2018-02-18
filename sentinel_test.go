@@ -8,7 +8,7 @@ import (
 )
 
 func TestGetMasterAddr(t *testing.T) {
-	masterName := "master1"
+	masterName := "example"
 	masterAddr := "172.16.0.1:6379"
 
 	snt := &Sentinel{
@@ -26,11 +26,13 @@ func TestGetMasterAddr(t *testing.T) {
 }
 
 func TestGetMasterAddr_NotDiscovered(t *testing.T) {
-	masterName := "master1"
+	masterName := "example"
 
 	snt := &Sentinel{
 		groups: map[string]*group{
-			masterName: {},
+			masterName: {
+				master: "",
+			},
 		},
 	}
 
@@ -41,18 +43,22 @@ func TestGetMasterAddr_NotDiscovered(t *testing.T) {
 }
 
 func TestGetMasterAddr_NotRegistered(t *testing.T) {
-	snt := &Sentinel{}
+	snt := &Sentinel{
+		groups: map[string]*group{},
+	}
 
-	addr, err := snt.GetMasterAddr("master1")
+	addr, err := snt.GetMasterAddr("example")
 
 	assert.Equal(t, ErrInvalidMasterName, err)
 	assert.Empty(t, addr)
 }
 
 func TestGetSlavesAddrs(t *testing.T) {
-	masterName := "master1"
+	masterName := "example"
+
 	slavesAddrs := []string{
-		"172.16.0.1:6379", "172.16.0.1:6380",
+		"172.16.0.1:6379",
+		"172.16.0.1:6380",
 	}
 
 	snt := &Sentinel{
@@ -70,16 +76,18 @@ func TestGetSlavesAddrs(t *testing.T) {
 }
 
 func TestGetSlavesAddrs_NotRegistered(t *testing.T) {
-	snt := &Sentinel{}
+	snt := &Sentinel{
+		groups: map[string]*group{},
+	}
 
-	addrs, err := snt.GetSlavesAddrs("master1")
+	addrs, err := snt.GetSlavesAddrs("example")
 
 	assert.Equal(t, ErrInvalidMasterName, err)
 	assert.Nil(t, addrs)
 }
 
 func TestHandleNotification_SwitchMaster(t *testing.T) {
-	masterName := "master1"
+	masterName := "example"
 
 	snt := &Sentinel{
 		groups: map[string]*group{
@@ -91,7 +99,7 @@ func TestHandleNotification_SwitchMaster(t *testing.T) {
 
 	snt.handleNotification(redis.Message{
 		Channel: "+switch-master",
-		Data:    []byte("master1 172.16.0.1 6379 172.16.0.2 6380"),
+		Data:    []byte("example 172.16.0.1 6379 172.16.0.2 6380"),
 	})
 
 	master, err := snt.GetMasterAddr(masterName)
@@ -101,7 +109,7 @@ func TestHandleNotification_SwitchMaster(t *testing.T) {
 }
 
 func TestHandleNotification_SlaveUp(t *testing.T) {
-	masterName := "master1"
+	masterName := "example"
 
 	snt := &Sentinel{
 		groups: map[string]*group{
@@ -111,9 +119,10 @@ func TestHandleNotification_SlaveUp(t *testing.T) {
 		},
 	}
 
+	// new slave 172.16.0.1 6380
 	snt.handleNotification(redis.Message{
 		Channel: "+slave",
-		Data:    []byte("slave <name> 172.16.0.1 6380 @ master1 172.16.0.1 6379"),
+		Data:    []byte("slave <name> 172.16.0.1 6380 @ example 172.16.0.1 6379"),
 	})
 
 	slaves, err := snt.GetSlavesAddrs(masterName)
@@ -121,15 +130,49 @@ func TestHandleNotification_SlaveUp(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, []string{"172.16.0.1:6380"}, slaves)
 
+	// slave 172.16.0.1 is available again
 	snt.handleNotification(redis.Message{
 		Channel: "-sdown",
-		Data:    []byte("slave <name> 172.16.0.1 6381 @ master1 172.16.0.1 6379"),
+		Data:    []byte("slave <name> 172.16.0.1 6381 @ example 172.16.0.1 6379"),
 	})
 
 	slaves, err = snt.GetSlavesAddrs(masterName)
 
 	assert.Nil(t, err)
 	assert.Equal(t, []string{"172.16.0.1:6380", "172.16.0.1:6381"}, slaves)
+
+	// new slave 172.16.0.1, should not duplicate
+	snt.handleNotification(redis.Message{
+		Channel: "+slave",
+		Data:    []byte("slave <name> 172.16.0.1 6381 @ example 172.16.0.1 6379"),
+	})
+
+	slaves, err = snt.GetSlavesAddrs(masterName)
+
+	assert.Nil(t, err)
+	assert.Equal(t, []string{"172.16.0.1:6380", "172.16.0.1:6381"}, slaves)
+}
+
+func TestHandleNotification_SlaveDown(t *testing.T) {
+	masterName := "example"
+
+	snt := &Sentinel{
+		groups: map[string]*group{
+			masterName: {
+				slaves: []string{"172.16.0.1:6380"},
+			},
+		},
+	}
+
+	snt.handleNotification(redis.Message{
+		Channel: "+sdown",
+		Data:    []byte("slave <name> 172.16.0.1 6380 @ example 172.16.0.1 6379"),
+	})
+
+	slaves, err := snt.GetSlavesAddrs(masterName)
+
+	assert.Nil(t, err)
+	assert.Empty(t, slaves)
 }
 
 func Test_Addrs(t *testing.T) {
@@ -148,26 +191,15 @@ func Test_Addrs(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	addrs := []string{
-		"172.16.0.1:26379",
-	}
-
-	groups := []string{
-		"master1",
-		"master2",
-	}
+	addrs := []string{"172.16.0.1:26379"}
+	groups := []string{"example", "example1"}
 
 	snt := New(&Config{
 		Addrs:  addrs,
 		Groups: groups,
 	})
 
-	sntGroups := make([]string, 0)
-
-	for name := range snt.groups {
-		sntGroups = append(sntGroups, name)
-	}
-
 	assert.Equal(t, addrs, snt.addrs)
-	assert.Equal(t, groups, sntGroups)
+	assert.NotNil(t, snt.groups[groups[0]])
+	assert.NotNil(t, snt.groups[groups[1]])
 }
