@@ -3,6 +3,10 @@ language: go
 go:
   - 1.9.4
 
+install:
+  - go get -u github.com/golang/dep/...
+  - dep ensure
+
 script:
   - go test -race -coverprofile=coverage.txt -covermode=atomic
 
