@@ -18,15 +18,15 @@ const (
 )
 
 var (
-	defaultDiscoverInterval = 30 * time.Second
+	defaultRefreshInterval = 45 * time.Second
 
-	defaultHeartbeatInterval = 15 * time.Second
+	defaultHeartbeatInterval = 10 * time.Second
 	defaultHeartbeatTimeout  = 5 * time.Second
 
-	listenRetryTimeout = 1 * time.Second
+	listenRetryTimeout = 500 * time.Millisecond
 )
 
-// Config is sentinel watcher config
+// Config is a sentinel watcher config
 type Config struct {
 	// Addrs is a list of redis sentinel instances addresses
 	Addrs []string
@@ -40,8 +40,8 @@ type Config struct {
 	// WriteTimeout specifies the timeout writing to connection
 	WriteTimeout time.Duration
 
-	// DiscoverInterval specifies the interval for redis instances discovery
-	DiscoverInterval time.Duration
+	// RefreshInterval specifies the interval for redis instances refresh
+	RefreshInterval time.Duration
 
 	// HeartbeatInterval specifies the interval for pub/sub connection healthchecks
 	HeartbeatInterval time.Duration
@@ -52,7 +52,7 @@ type Config struct {
 	OnError func(err error)
 }
 
-// Sentinel is sentinel watcher
+// Sentinel is a sentinel watcher
 type Sentinel struct {
 	addrs []string
 	pos   int64
@@ -63,7 +63,7 @@ type Sentinel struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 
-	discoverInterval time.Duration
+	refreshInterval time.Duration
 
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -75,7 +75,7 @@ type Sentinel struct {
 }
 
 // New creates sentinel watcher with provided config
-func New(c *Config) *Sentinel {
+func New(c Config) *Sentinel {
 	if len(c.Addrs) < 1 {
 		panic("at least 1 sentinel address is required")
 	}
@@ -92,9 +92,9 @@ func New(c *Config) *Sentinel {
 		onError = func(err error) {}
 	}
 
-	discoverInterval := c.DiscoverInterval
-	if discoverInterval < 1 {
-		discoverInterval = defaultDiscoverInterval
+	refreshInterval := c.RefreshInterval
+	if refreshInterval < 1 {
+		refreshInterval = defaultRefreshInterval
 	}
 
 	heartbeatInterval := c.HeartbeatInterval
@@ -113,7 +113,7 @@ func New(c *Config) *Sentinel {
 		dialTimeout:       c.DialTimeout,
 		readTimeout:       c.ReadTimeout,
 		writeTimeout:      c.WriteTimeout,
-		discoverInterval:  discoverInterval,
+		refreshInterval:   refreshInterval,
 		heartbeatInterval: heartbeatInterval,
 		heartbeatTimeout:  heartbeatTimeout,
 		onError:           onError,
@@ -123,7 +123,7 @@ func New(c *Config) *Sentinel {
 // GetMasterAddr returns redis master address
 func (s *Sentinel) GetMasterAddr(name string) (string, error) {
 	if grp, ok := s.groups[name]; ok {
-		if addr := grp.getMaster(); addr != "" {
+		if addr := grp.masterAddr(); addr != "" {
 			return addr, nil
 		}
 
@@ -136,7 +136,7 @@ func (s *Sentinel) GetMasterAddr(name string) (string, error) {
 // GetSlavesAddrs returns reachable redis slaves addresses
 func (s *Sentinel) GetSlavesAddrs(name string) ([]string, error) {
 	if grp, ok := s.groups[name]; ok {
-		return grp.getSlaves(), nil
+		return grp.slavesAddrs(), nil
 	}
 
 	return nil, ErrInvalidMasterName
@@ -154,7 +154,7 @@ func (s *Sentinel) Run() {
 
 		s.discover()
 
-		t := time.NewTicker(s.discoverInterval)
+		t := time.NewTicker(s.refreshInterval)
 
 		for {
 			select {
@@ -189,21 +189,21 @@ func (s *Sentinel) Stop() {
 }
 
 func (s *Sentinel) discover() {
-	conn, err := redis.Dial("tcp", s.getAddr(),
+	conn, err := redis.Dial("tcp", s.getSentinelAddr(),
 		redis.DialConnectTimeout(s.dialTimeout),
 		redis.DialReadTimeout(s.readTimeout),
 		redis.DialWriteTimeout(s.writeTimeout),
 	)
 
 	if err != nil {
-		s.shiftAddr()
+		s.shiftSentinelAddr()
 		s.onError(err)
 		return
 	}
 
 	for _, grp := range s.groups {
 		if err := s.discoverGroup(conn, grp); err != nil {
-			s.onError(fmt.Errorf("%s %s", grp.name, err))
+			s.onError(fmt.Errorf("[%s] %s", grp.name, err))
 		}
 	}
 
@@ -211,19 +211,26 @@ func (s *Sentinel) discover() {
 }
 
 func (s *Sentinel) discoverGroup(conn redis.Conn, grp *group) error {
-	master, err := s.discoverMaster(conn, grp.name)
+	master, err := s.queryMaster(conn, grp.name)
 	if err != nil {
+		if err != errMasterNameNotFound {
+			return err
+		}
+
+		if addr := grp.masterAddr(); addr != "" {
+			grp.reset()
+		}
+
 		return err
 	}
 
-	err = s.testRole(master, masterRole)
-	if err != nil {
+	if err := s.testRole(master, masterRole); err != nil {
 		return err
 	}
 
 	grp.syncMaster(master)
 
-	slaves, err := s.discoverSlaves(conn, grp.name)
+	slaves, err := s.querySlaves(conn, grp.name)
 	if err != nil {
 		return err
 	}
@@ -244,15 +251,14 @@ func (s *Sentinel) listen(ctx context.Context) {
 			break
 		}
 
-		conn, err := redis.Dial("tcp", s.getAddr(),
+		conn, err := redis.Dial("tcp", s.getSentinelAddr(),
 			redis.DialConnectTimeout(s.dialTimeout),
 			redis.DialReadTimeout(s.heartbeatInterval+s.heartbeatTimeout),
 			redis.DialWriteTimeout(s.writeTimeout),
 		)
 
 		if err != nil {
-			s.shiftAddr()
-			s.onError(fmt.Errorf("pub/sub %s", err))
+			s.shiftSentinelAddr()
 			time.Sleep(listenRetryTimeout)
 			continue
 		}
@@ -261,7 +267,6 @@ func (s *Sentinel) listen(ctx context.Context) {
 
 		err = psconn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
 		if err != nil {
-			s.onError(fmt.Errorf("pub/sub subscribe %s", err))
 			psconn.Close()
 			continue
 		}
@@ -272,20 +277,12 @@ func (s *Sentinel) listen(ctx context.Context) {
 		pingDone := s.listenPing(psconn, stopPing)
 
 		select {
-		case err := <-recvDone:
-			if err != nil {
-				s.onError(fmt.Errorf("pub/sub receive %s", err))
-			}
-
+		case <-recvDone:
 			close(stopPing)
 
 			psconn.Close()
 
-		case err := <-pingDone:
-			if err != nil {
-				s.onError(fmt.Errorf("pub/sub ping %s", err))
-			}
-
+		case <-pingDone:
 			psconn.Close()
 
 		case <-ctx.Done():
@@ -389,15 +386,15 @@ func (s *Sentinel) handleNotification(msg redis.Message) {
 		addr := net.JoinHostPort(parts[2], parts[3])
 
 		if msg.Channel == "+sdown" {
-			grp.syncSlaveDown(addr)
+			grp.removeSlave(addr)
 			return
 		}
 
-		grp.syncSlaveUp(addr)
+		grp.addSlave(addr)
 	}
 }
 
-func (s *Sentinel) discoverMaster(conn redis.Conn, name string) (string, error) {
+func (s *Sentinel) queryMaster(conn redis.Conn, name string) (string, error) {
 	reply, err := redis.Strings(conn.Do("SENTINEL", "get-master-addr-by-name", name))
 	if err != nil {
 		if err == redis.ErrNil {
@@ -413,7 +410,7 @@ func (s *Sentinel) discoverMaster(conn redis.Conn, name string) (string, error) 
 	return net.JoinHostPort(reply[0], reply[1]), nil
 }
 
-func (s *Sentinel) discoverSlaves(conn redis.Conn, name string) ([]string, error) {
+func (s *Sentinel) querySlaves(conn redis.Conn, name string) ([]string, error) {
 	reply, err := redis.Values(conn.Do("SENTINEL", "slaves", name))
 	if err != nil {
 		return nil, err
@@ -444,7 +441,7 @@ func (s *Sentinel) testRole(addr, expRole string) error {
 	}
 
 	if role != expRole {
-		return fmt.Errorf("%s has invalid role: %s", addr, role)
+		return fmt.Errorf("%s invalid role: %s", addr, role)
 	}
 
 	return nil
@@ -473,10 +470,10 @@ func (s *Sentinel) getRole(addr string) (string, error) {
 	return redis.String(reply[0], nil)
 }
 
-func (s *Sentinel) getAddr() string {
+func (s *Sentinel) getSentinelAddr() string {
 	return s.addrs[atomic.LoadInt64(&s.pos)]
 }
 
-func (s *Sentinel) shiftAddr() {
+func (s *Sentinel) shiftSentinelAddr() {
 	atomic.StoreInt64(&s.pos, (atomic.LoadInt64(&s.pos)+1)%int64(len(s.addrs)))
 }

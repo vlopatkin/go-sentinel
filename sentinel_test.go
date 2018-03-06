@@ -183,18 +183,18 @@ func Test_Addrs(t *testing.T) {
 
 	snt := &Sentinel{addrs: addrs}
 
-	assert.Equal(t, addrs[0], snt.getAddr())
+	assert.Equal(t, addrs[0], snt.getSentinelAddr())
 
-	snt.shiftAddr()
+	snt.shiftSentinelAddr()
 
-	assert.Equal(t, addrs[1], snt.getAddr())
+	assert.Equal(t, addrs[1], snt.getSentinelAddr())
 }
 
 func TestNew(t *testing.T) {
 	addrs := []string{"172.16.0.1:26379"}
 	groups := []string{"example", "example1"}
 
-	snt := New(&Config{
+	snt := New(Config{
 		Addrs:  addrs,
 		Groups: groups,
 	})

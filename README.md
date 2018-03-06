@@ -22,9 +22,12 @@ Usage
 
 ```golang
 // create sentinel watcher with minimal config
-snt := sentinel.New(&sentinel.Config{
-    Addrs:  []string{"localhost:26379"},
-    Groups: []string{"example"},
+snt := sentinel.New(sentinel.Config{
+	Addrs:             []string{"localhost:26379"},
+	Groups:            []string{"example"},
+	RefreshInterval:   45 * time.Second,
+	HeartbeatInterval: 10 * time.Second,
+	HeartbeatTimeout:  5 * time.Second,
 })
 
 // run redis instances discovery for configured groups
@@ -33,9 +36,9 @@ go snt.Run()
 
 defer snt.Stop()
 
-// get master redis instance for 'example' master name
+// get master address for 'example' master name
 master, err := snt.GetMasterAddr("example")
 
-// get slave redis instances for 'example' master name
+// get slaves addresses for 'example' master name
 slaves, err := snt.GetSlavesAddrs("example")
 ```
