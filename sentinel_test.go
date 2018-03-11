@@ -1,51 +1,103 @@
 package sentinel
 
 import (
+	"errors"
 	"testing"
+
+	"github.com/arwx/go-sentinel/mocks"
 
 	"github.com/garyburd/redigo/redis"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetMasterAddr(t *testing.T) {
-	masterName := "example"
-	masterAddr := "172.16.0.1:6379"
+func TestQueryMaster(t *testing.T) {
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
 
-	snt := &Sentinel{
-		groups: map[string]*group{
-			masterName: {
-				master: masterAddr,
-			},
-		},
-	}
+	conn := new(mocks.Conn)
 
-	addr, err := snt.GetMasterAddr(masterName)
+	connResp := []interface{}{"172.16.0.1", "6379"}
+
+	conn.Mock.On("Do", "SENTINEL", "get-master-addr-by-name", "example").Return(connResp, nil)
+
+	master, err := snt.queryMaster(conn, "example")
+
+	conn.Mock.AssertExpectations(t)
 
 	assert.Nil(t, err)
-	assert.Equal(t, masterAddr, addr)
+	assert.Equal(t, "172.16.0.1:6379", master)
+}
+
+func TestQueryMaster_ConnNilReply(t *testing.T) {
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
+
+	conn := new(mocks.Conn)
+
+	conn.Mock.On("Do", "SENTINEL", "get-master-addr-by-name", "example").Return(nil, redis.ErrNil)
+
+	master, err := snt.queryMaster(conn, "example")
+
+	conn.Mock.AssertExpectations(t)
+
+	assert.Equal(t, errMasterNameNotFound, err)
+	assert.Empty(t, master)
+}
+
+func TestQueryMaster_ConnError(t *testing.T) {
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
+
+	conn := new(mocks.Conn)
+
+	connErr := errors.New("dial timeout")
+
+	conn.Mock.On("Do", "SENTINEL", "get-master-addr-by-name", "example").Return(nil, connErr)
+
+	master, err := snt.queryMaster(conn, "example")
+
+	conn.Mock.AssertExpectations(t)
+
+	assert.Equal(t, connErr, err)
+	assert.Empty(t, master)
+}
+
+func TestGetMasterAddr(t *testing.T) {
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
+
+	snt.groups["example"].syncMaster("172.16.0.1:6379")
+
+	addr, err := snt.GetMasterAddr("example")
+
+	assert.Nil(t, err)
+	assert.Equal(t, "172.16.0.1:6379", addr)
 }
 
 func TestGetMasterAddr_NotDiscovered(t *testing.T) {
-	masterName := "example"
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
 
-	snt := &Sentinel{
-		groups: map[string]*group{
-			masterName: {
-				master: "",
-			},
-		},
-	}
-
-	addr, err := snt.GetMasterAddr(masterName)
+	addr, err := snt.GetMasterAddr("example")
 
 	assert.Equal(t, ErrMasterUnavailable, err)
 	assert.Empty(t, addr)
 }
 
-func TestGetMasterAddr_NotRegistered(t *testing.T) {
-	snt := &Sentinel{
-		groups: map[string]*group{},
-	}
+func TestGetMasterAddr_GroupNotRegistered(t *testing.T) {
+	snt := New(Config{
+		Addrs: []string{"localhost:26379"},
+	})
 
 	addr, err := snt.GetMasterAddr("example")
 
@@ -54,31 +106,28 @@ func TestGetMasterAddr_NotRegistered(t *testing.T) {
 }
 
 func TestGetSlavesAddrs(t *testing.T) {
-	masterName := "example"
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
 
 	slavesAddrs := []string{
 		"172.16.0.1:6379",
 		"172.16.0.1:6380",
 	}
 
-	snt := &Sentinel{
-		groups: map[string]*group{
-			masterName: {
-				slaves: slavesAddrs,
-			},
-		},
-	}
+	snt.groups["example"].syncSlaves(slavesAddrs)
 
-	addrs, err := snt.GetSlavesAddrs(masterName)
+	addrs, err := snt.GetSlavesAddrs("example")
 
 	assert.Nil(t, err)
 	assert.Equal(t, slavesAddrs, addrs)
 }
 
-func TestGetSlavesAddrs_NotRegistered(t *testing.T) {
-	snt := &Sentinel{
-		groups: map[string]*group{},
-	}
+func TestGetSlavesAddrs_GroupNotRegistered(t *testing.T) {
+	snt := New(Config{
+		Addrs: []string{"localhost:26379"},
+	})
 
 	addrs, err := snt.GetSlavesAddrs("example")
 
@@ -87,37 +136,29 @@ func TestGetSlavesAddrs_NotRegistered(t *testing.T) {
 }
 
 func TestHandleNotification_SwitchMaster(t *testing.T) {
-	masterName := "example"
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
 
-	snt := &Sentinel{
-		groups: map[string]*group{
-			masterName: {
-				master: "172.16.0.1:6379",
-			},
-		},
-	}
+	snt.groups["example"].syncMaster("172.16.0.1:6379")
 
 	snt.handleNotification(redis.Message{
 		Channel: "+switch-master",
 		Data:    []byte("example 172.16.0.1 6379 172.16.0.2 6380"),
 	})
 
-	master, err := snt.GetMasterAddr(masterName)
+	master, err := snt.GetMasterAddr("example")
 
 	assert.Nil(t, err)
 	assert.Equal(t, "172.16.0.2:6380", master)
 }
 
 func TestHandleNotification_SlaveUp(t *testing.T) {
-	masterName := "example"
-
-	snt := &Sentinel{
-		groups: map[string]*group{
-			masterName: {
-				slaves: []string{},
-			},
-		},
-	}
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
 
 	// new slave 172.16.0.1 6380
 	snt.handleNotification(redis.Message{
@@ -125,7 +166,7 @@ func TestHandleNotification_SlaveUp(t *testing.T) {
 		Data:    []byte("slave <name> 172.16.0.1 6380 @ example 172.16.0.1 6379"),
 	})
 
-	slaves, err := snt.GetSlavesAddrs(masterName)
+	slaves, err := snt.GetSlavesAddrs("example")
 
 	assert.Nil(t, err)
 	assert.Equal(t, []string{"172.16.0.1:6380"}, slaves)
@@ -136,7 +177,7 @@ func TestHandleNotification_SlaveUp(t *testing.T) {
 		Data:    []byte("slave <name> 172.16.0.1 6381 @ example 172.16.0.1 6379"),
 	})
 
-	slaves, err = snt.GetSlavesAddrs(masterName)
+	slaves, err = snt.GetSlavesAddrs("example")
 
 	assert.Nil(t, err)
 	assert.Equal(t, []string{"172.16.0.1:6380", "172.16.0.1:6381"}, slaves)
@@ -147,35 +188,32 @@ func TestHandleNotification_SlaveUp(t *testing.T) {
 		Data:    []byte("slave <name> 172.16.0.1 6381 @ example 172.16.0.1 6379"),
 	})
 
-	slaves, err = snt.GetSlavesAddrs(masterName)
+	slaves, err = snt.GetSlavesAddrs("example")
 
 	assert.Nil(t, err)
 	assert.Equal(t, []string{"172.16.0.1:6380", "172.16.0.1:6381"}, slaves)
 }
 
 func TestHandleNotification_SlaveDown(t *testing.T) {
-	masterName := "example"
+	snt := New(Config{
+		Addrs:  []string{"localhost:26379"},
+		Groups: []string{"example"},
+	})
 
-	snt := &Sentinel{
-		groups: map[string]*group{
-			masterName: {
-				slaves: []string{"172.16.0.1:6380"},
-			},
-		},
-	}
+	snt.groups["example"].syncSlaves([]string{"172.16.0.1:6380"})
 
 	snt.handleNotification(redis.Message{
 		Channel: "+sdown",
 		Data:    []byte("slave <name> 172.16.0.1 6380 @ example 172.16.0.1 6379"),
 	})
 
-	slaves, err := snt.GetSlavesAddrs(masterName)
+	slaves, err := snt.GetSlavesAddrs("example")
 
 	assert.Nil(t, err)
 	assert.Empty(t, slaves)
 }
 
-func Test_Addrs(t *testing.T) {
+func TestSentinelAddrs(t *testing.T) {
 	addrs := []string{
 		"172.16.0.1:26379",
 		"172.16.0.2:26379",
@@ -188,18 +226,4 @@ func Test_Addrs(t *testing.T) {
 	snt.shiftSentinelAddr()
 
 	assert.Equal(t, addrs[1], snt.getSentinelAddr())
-}
-
-func TestNew(t *testing.T) {
-	addrs := []string{"172.16.0.1:26379"}
-	groups := []string{"example", "example1"}
-
-	snt := New(Config{
-		Addrs:  addrs,
-		Groups: groups,
-	})
-
-	assert.Equal(t, addrs, snt.addrs)
-	assert.NotNil(t, snt.groups[groups[0]])
-	assert.NotNil(t, snt.groups[groups[1]])
 }
