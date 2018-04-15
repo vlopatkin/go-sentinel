@@ -68,6 +68,7 @@ type Sentinel struct {
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
 
+	mu   sync.Mutex
 	stop chan bool
 	wg   sync.WaitGroup
 
@@ -144,6 +145,7 @@ func (s *Sentinel) GetSlavesAddrs(name string) ([]string, error) {
 
 // Run starts redis instances discovery and pub/sub updates listening
 func (s *Sentinel) Run() {
+	s.mu.Lock()
 	s.stop = make(chan bool)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -170,6 +172,8 @@ func (s *Sentinel) Run() {
 	s.wg.Add(1)
 	go s.listen(ctx)
 
+	s.mu.Unlock()
+
 	<-s.stop
 
 	cancel()
@@ -178,6 +182,9 @@ func (s *Sentinel) Run() {
 // Stop initiates graceful shutdown of sentinel watcher.
 // It blocks until all underlying connections are released
 func (s *Sentinel) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.stop == nil {
 		return
 	}
