@@ -6,7 +6,7 @@ import (
 
 	"github.com/arwx/go-sentinel/mocks"
 
-	"github.com/garyburd/redigo/redis"
+	"github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
 )
 

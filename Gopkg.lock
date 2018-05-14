@@ -8,13 +8,13 @@
   version = "v1.1.0"
 
 [[projects]]
-  name = "github.com/garyburd/redigo"
+  name = "github.com/gomodule/redigo"
   packages = [
     "internal",
     "redis"
   ]
-  revision = "a69d19351219b6dd56f274f96d85a7014a2ec34e"
-  version = "v1.6.0"
+  revision = "9c11da706d9b7902c6da69c592f75637793fe121"
+  version = "v2.0.0"
 
 [[projects]]
   name = "github.com/pmezard/go-difflib"
@@ -40,6 +40,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "a36c1cafcecf91a26117599b415d200b44299aa37009b84f469b3487ce094b5b"
+  inputs-digest = "5182ac023a7328791348b09315d3501bdeeb3c52a6469f33c5e767380916e952"
   solver-name = "gps-cdcl"
   solver-version = 1
