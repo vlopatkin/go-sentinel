@@ -24,7 +24,7 @@ Usage
 // create sentinel watcher with minimal config
 snt := sentinel.New(sentinel.Config{
 	Addrs:             []string{"localhost:26379"},
-	Groups:            []string{"example"},
+	Groups:            []string{"redis01", "redis02", "redis03"},
 	RefreshInterval:   45 * time.Second,
 	HeartbeatInterval: 10 * time.Second,
 	HeartbeatTimeout:  5 * time.Second,
@@ -37,8 +37,8 @@ go snt.Run()
 defer snt.Stop()
 
 // get master address for 'example' master name
-master, err := snt.GetMasterAddr("example")
+master, err := snt.GetMasterAddr("redis01")
 
 // get slaves addresses for 'example' master name
-slaves, err := snt.GetSlavesAddrs("example")
+slaves, err := snt.GetSlavesAddrs("redis01")
 ```
