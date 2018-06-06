@@ -1,8 +1,8 @@
 ## go-sentinel
 
-[![Build Status](https://travis-ci.org/arwx/go-sentinel.svg?branch=master)](https://travis-ci.org/arwx/go-sentinel)
-[![codecov](https://codecov.io/gh/arwx/go-sentinel/branch/master/graph/badge.svg)](https://codecov.io/gh/arwx/go-sentinel)
-[![Go Report Card](https://goreportcard.com/badge/github.com/arwx/go-sentinel)](https://goreportcard.com/report/github.com/arwx/go-sentinel)
+[![Build Status](https://travis-ci.org/ncade/go-sentinel.svg?branch=master)](https://travis-ci.org/ncade/go-sentinel)
+[![codecov](https://codecov.io/gh/ncade/go-sentinel/branch/master/graph/badge.svg)](https://codecov.io/gh/ncade/go-sentinel)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ncade/go-sentinel)](https://goreportcard.com/report/github.com/ncade/go-sentinel)
 
 Package sentinel implements Redis Sentinel pub/sub watcher for golang
 
@@ -11,11 +11,11 @@ Installation
 
 Install go-sentinel using the "go get" command:
 
-    go get github.com/arwx/go-sentinel
+    go get github.com/ncade/go-sentinel
 
 Documentation
 -------------
-See [godoc](https://godoc.org/github.com/arwx/go-sentinel) for package and API descriptions
+See [godoc](https://godoc.org/github.com/ncade/go-sentinel) for package and API descriptions
 
 Usage
 -----

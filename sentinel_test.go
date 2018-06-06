@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/arwx/go-sentinel/mocks"
+	"github.com/ncade/go-sentinel/mocks"
 
 	"github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
