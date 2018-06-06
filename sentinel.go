@@ -452,7 +452,7 @@ func (s *Sentinel) testRole(addr, expRole string) error {
 }
 
 func (s *Sentinel) getRole(addr string) (string, error) {
-	conn, err := s.connDial(s.getSentinelAddr())
+	conn, err := s.connDial(addr)
 	if err != nil {
 		return "", err
 	}
