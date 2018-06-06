@@ -59,15 +59,10 @@ type Sentinel struct {
 
 	groups map[string]*group
 
-	dialTimeout  time.Duration
-	readTimeout  time.Duration
-	writeTimeout time.Duration
-
 	connDial   func(addr string) (redis.Conn, error)
 	psConnDial func(addr string) (redis.PubSubConn, error)
 
-	refreshInterval time.Duration
-
+	refreshInterval   time.Duration
 	heartbeatInterval time.Duration
 
 	mu   sync.Mutex
