@@ -213,6 +213,25 @@ func TestSentinelHandleNotification_SlaveDown(t *testing.T) {
 	assert.Empty(t, slaves)
 }
 
+func TestSentinelTestRole(t *testing.T) {
+	conn := new(mocks.Conn)
+
+	snt := &Sentinel{
+		addrs: []string{"localhost:26379"},
+		connDial: func(addr string) (redis.Conn, error) {
+			return conn, nil
+		},
+	}
+
+	connResp := []interface{}{"master", 3129659}
+
+	conn.Mock.On("Do", "ROLE").Return(connResp, nil)
+
+	err := snt.testRole("172.16.0.1:6379", "master")
+
+	assert.Nil(t, err)
+}
+
 func TestSentinelAddrs(t *testing.T) {
 	addrs := []string{
 		"172.16.0.1:26379",

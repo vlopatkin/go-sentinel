@@ -36,9 +36,9 @@ go snt.Run()
 
 defer snt.Stop()
 
-// get master address for 'example' master name
+// get master address for 'redis01' master name
 master, err := snt.GetMasterAddr("redis01")
 
-// get slaves addresses for 'example' master name
+// get slaves addresses for 'redis01' master name
 slaves, err := snt.GetSlavesAddrs("redis01")
 ```

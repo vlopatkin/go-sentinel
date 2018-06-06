@@ -63,10 +63,12 @@ type Sentinel struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 
+	connDial   func(addr string) (redis.Conn, error)
+	psConnDial func(addr string) (redis.PubSubConn, error)
+
 	refreshInterval time.Duration
 
 	heartbeatInterval time.Duration
-	heartbeatTimeout  time.Duration
 
 	mu   sync.Mutex
 	stop chan bool
@@ -109,14 +111,26 @@ func New(c Config) *Sentinel {
 	}
 
 	return &Sentinel{
-		addrs:             c.Addrs,
-		groups:            groups,
-		dialTimeout:       c.DialTimeout,
-		readTimeout:       c.ReadTimeout,
-		writeTimeout:      c.WriteTimeout,
+		addrs:  c.Addrs,
+		groups: groups,
+		connDial: func(addr string) (redis.Conn, error) {
+			return redis.Dial("tcp", addr,
+				redis.DialConnectTimeout(c.DialTimeout),
+				redis.DialReadTimeout(c.ReadTimeout),
+				redis.DialWriteTimeout(c.WriteTimeout),
+			)
+		},
+		psConnDial: func(addr string) (redis.PubSubConn, error) {
+			conn, err := redis.Dial("tcp", addr,
+				redis.DialConnectTimeout(c.DialTimeout),
+				redis.DialReadTimeout(heartbeatInterval+heartbeatTimeout),
+				redis.DialWriteTimeout(c.WriteTimeout),
+			)
+
+			return redis.PubSubConn{conn}, err
+		},
 		refreshInterval:   refreshInterval,
 		heartbeatInterval: heartbeatInterval,
-		heartbeatTimeout:  heartbeatTimeout,
 		onError:           onError,
 	}
 }
@@ -196,12 +210,7 @@ func (s *Sentinel) Stop() {
 }
 
 func (s *Sentinel) discover() {
-	conn, err := redis.Dial("tcp", s.getSentinelAddr(),
-		redis.DialConnectTimeout(s.dialTimeout),
-		redis.DialReadTimeout(s.readTimeout),
-		redis.DialWriteTimeout(s.writeTimeout),
-	)
-
+	conn, err := s.connDial(s.getSentinelAddr())
 	if err != nil {
 		s.shiftSentinelAddr()
 		s.onError(err)
@@ -258,48 +267,41 @@ func (s *Sentinel) listen(ctx context.Context) {
 			break
 		}
 
-		conn, err := redis.Dial("tcp", s.getSentinelAddr(),
-			redis.DialConnectTimeout(s.dialTimeout),
-			redis.DialReadTimeout(s.heartbeatInterval+s.heartbeatTimeout),
-			redis.DialWriteTimeout(s.writeTimeout),
-		)
-
+		conn, err := s.psConnDial(s.getSentinelAddr())
 		if err != nil {
 			s.shiftSentinelAddr()
 			time.Sleep(listenRetryTimeout)
 			continue
 		}
 
-		psconn := redis.PubSubConn{conn}
-
-		err = psconn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
+		err = conn.Subscribe("+switch-master", "+slave", "+sdown", "-sdown")
 		if err != nil {
-			psconn.Close()
+			conn.Close()
 			continue
 		}
 
-		recvDone := s.listenReceive(psconn)
+		recvDone := s.listenReceive(conn)
 
 		stopPing := make(chan bool, 1)
-		pingDone := s.listenPing(psconn, stopPing)
+		pingDone := s.listenPing(conn, stopPing)
 
 		select {
 		case <-recvDone:
 			close(stopPing)
 
-			psconn.Close()
+			conn.Close()
 
 		case <-pingDone:
-			psconn.Close()
+			conn.Close()
 
 		case <-ctx.Done():
-			psconn.Unsubscribe()
+			conn.Unsubscribe()
 
 			close(stopPing)
 
 			<-recvDone
 
-			psconn.Close()
+			conn.Close()
 			return
 		}
 
@@ -455,12 +457,7 @@ func (s *Sentinel) testRole(addr, expRole string) error {
 }
 
 func (s *Sentinel) getRole(addr string) (string, error) {
-	conn, err := redis.Dial("tcp", addr,
-		redis.DialConnectTimeout(s.dialTimeout),
-		redis.DialReadTimeout(s.readTimeout),
-		redis.DialWriteTimeout(s.writeTimeout),
-	)
-
+	conn, err := s.connDial(s.getSentinelAddr())
 	if err != nil {
 		return "", err
 	}
