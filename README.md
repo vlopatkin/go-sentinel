@@ -23,6 +23,7 @@ Usage
 ```golang
 // create sentinel watcher with minimal config
 snt := sentinel.New(sentinel.Config{
+	Password:          "password",
 	Addrs:             []string{"localhost:26379"},
 	Groups:            []string{"redis01", "redis02", "redis03"},
 	RefreshInterval:   45 * time.Second,

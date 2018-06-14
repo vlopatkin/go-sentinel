@@ -28,6 +28,8 @@ var (
 
 // Config is a sentinel watcher config
 type Config struct {
+	// Password for protected Redis instances
+	Password string
 	// Addrs is a list of redis sentinel instances addresses
 	Addrs []string
 	// Groups is a list of groups (master names) to discover
@@ -59,8 +61,9 @@ type Sentinel struct {
 
 	groups map[string]*group
 
-	connDial   func(addr string) (redis.Conn, error)
-	psConnDial func(addr string) (redis.PubSubConn, error)
+	connDial    func(addr string) (redis.Conn, error)
+	sntConnDial func(addr string) (redis.Conn, error)
+	psConnDial  func(addr string) (redis.PubSubConn, error)
 
 	refreshInterval   time.Duration
 	heartbeatInterval time.Duration
@@ -109,6 +112,14 @@ func New(c Config) *Sentinel {
 		addrs:  c.Addrs,
 		groups: groups,
 		connDial: func(addr string) (redis.Conn, error) {
+			return redis.Dial("tcp", addr,
+				redis.DialConnectTimeout(c.DialTimeout),
+				redis.DialReadTimeout(c.ReadTimeout),
+				redis.DialWriteTimeout(c.WriteTimeout),
+				redis.DialPassword(c.Password),
+			)
+		},
+		sntConnDial: func(addr string) (redis.Conn, error) {
 			return redis.Dial("tcp", addr,
 				redis.DialConnectTimeout(c.DialTimeout),
 				redis.DialReadTimeout(c.ReadTimeout),
@@ -205,7 +216,7 @@ func (s *Sentinel) Stop() {
 }
 
 func (s *Sentinel) discover() {
-	conn, err := s.connDial(s.getSentinelAddr())
+	conn, err := s.sntConnDial(s.getSentinelAddr())
 	if err != nil {
 		s.shiftSentinelAddr()
 		s.onError(err)
